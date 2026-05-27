@@ -38,7 +38,7 @@ A plugin for [SDRSharp](https://airspy.com/download/) that decodes and displays 
 
 ## Requirements
 
-- **SDRSharp** (any recent build)
+- **SDRSharp** (v1911 or older ONLY!)
 - **.NET 7 Windows Runtime** — included with SDRSharp; no separate install needed in most cases
 - A **FM-capable SDR receiver** tuned to an FM broadcast station with RDS
 
