@@ -84,4 +84,5 @@ See [LICENSE](LICENSE).
 ## Credits
 
 https://dxsphere.neocities.org/ Kyle / dxsphere - DB credits
+
 Kita Zaizen / dxfoxes - DB credits
