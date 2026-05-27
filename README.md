@@ -80,3 +80,8 @@ Output files will be in `sdrplugins/Release/net7.0-windows/`.
 ## License
 
 See [LICENSE](LICENSE).
+
+## Credits
+
+https://dxsphere.neocities.org/ Kyle / dxsphere - DB credits
+Kita Zaizen / dxfoxes - DB credits
