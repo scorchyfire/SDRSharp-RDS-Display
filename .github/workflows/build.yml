@@ -40,9 +40,13 @@ jobs:
       - name: Create release zip
         shell: pwsh
         run: |
-          $outDir = "sdrplugins/Release/net9.0-windows"
+          $dllPath = Get-ChildItem -Path "sdrplugins/Release" -Recurse -File -Filter "SDRSharp.RdsDisplay.dll" | Select-Object -First 1 -ExpandProperty FullName
+          $jsonPath = Get-ChildItem -Path "sdrplugins/Release" -Recurse -File -Filter "pi_codes.json" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dllPath -or -not $jsonPath) {
+            throw "Could not find build outputs under sdrplugins/Release."
+          }
           $zipName = "SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip"
-          Compress-Archive -Path "$outDir/SDRSharp.RdsDisplay.dll", "$outDir/pi_codes.json" -DestinationPath $zipName
+          Compress-Archive -Path $dllPath, $jsonPath -DestinationPath $zipName
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
