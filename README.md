@@ -38,8 +38,8 @@ A plugin for [SDRSharp](https://airspy.com/download/) that decodes and displays 
 
 ## Requirements
 
-- **SDRSharp** (v1911 or older ONLY!)
-- **.NET 7 Windows Runtime** — included with SDRSharp; no separate install needed in most cases
+- **SDRSharp** (v1912 or newer ONLY!)
+- **.NET 9 Windows Runtime** — included with SDRSharp; no separate install needed in most cases
 - A **FM-capable SDR receiver** tuned to an FM broadcast station with RDS
 
 ---
@@ -67,7 +67,7 @@ A plugin for [SDRSharp](https://airspy.com/download/) that decodes and displays 
 
 ## Building from Source
 
-Requirements: **.NET 7 SDK**, Windows (WinForms target)
+Requirements: **.NET 9 SDK**, Windows (WinForms target)
 
 ```bat
 dotnet build sdrplugins/sdrplugins.sln --configuration Release
