@@ -1,10 +1,10 @@
-name: Build and Release
+name: Build and Release (Latest Version)
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: ["latest-version"]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: ["latest-version"]
   workflow_dispatch:
 
 jobs:
@@ -16,68 +16,70 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '7.0.x'
+          dotnet-version: "7.0.x"
 
       - name: Build (Release)
         run: dotnet build sdrplugins/sdrplugins.sln --configuration Release
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content "version.txt" -Raw).Trim()
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "version.txt is empty"
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Create release zip
         shell: pwsh
         run: |
           $outDir = "sdrplugins/Release/net7.0-windows"
-          Compress-Archive -Path "$outDir/SDRSharp.RdsDisplay.dll", "$outDir/pi_codes.json" `
-            -DestinationPath "SDRSharp.RdsDisplay.zip"
+          $zipName = "SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip"
+          Compress-Archive -Path "$outDir/SDRSharp.RdsDisplay.dll", "$outDir/pi_codes.json" -DestinationPath $zipName
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SDRSharp.RdsDisplay
-          path: SDRSharp.RdsDisplay.zip
+          name: SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}
+          path: SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip
 
-      - name: Determine next release tag
-        if: github.event_name != 'pull_request'
-        id: next_tag
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const tags = await github.paginate(github.rest.repos.listTags, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
+      - name: Check release eligibility
+        if: github.event_name == 'push'
+        id: release_gate
+        shell: pwsh
+        run: |
+          $currentVersion = "${{ steps.version.outputs.version }}"
+          $before = "${{ github.event.before }}"
+          $shouldRelease = $false
 
-            let maxMajor = 0;
-            let maxMinor = 0;
-            let hasVersionTag = false;
-
-            for (const tag of tags) {
-              const match = /^v(\d+)\.(\d+)$/.exec(tag.name);
-              if (!match) {
-                continue;
-              }
-
-              const major = Number(match[1]);
-              const minor = Number(match[2]);
-
-              if (!hasVersionTag || major > maxMajor || (major === maxMajor && minor > maxMinor)) {
-                maxMajor = major;
-                maxMinor = minor;
-                hasVersionTag = true;
+          if ($before -and $before -ne "0000000000000000000000000000000000000000") {
+            $changed = git diff --name-only $before "${{ github.sha }}" -- version.txt
+            if ($changed) {
+              $previousVersion = (git show "$before:version.txt" 2>$null).Trim()
+              if ($previousVersion -ne $currentVersion) {
+                $shouldRelease = $true
               }
             }
+          }
 
-            const nextTag = hasVersionTag ? `v${maxMajor}.${maxMinor + 1}` : 'v0.1';
-            core.setOutput('tag', nextTag);
-            core.info(`Next release tag: ${nextTag}`);
+          if (-not $shouldRelease) {
+            Write-Host "Skipping release: version.txt not changed to a different version."
+          }
+
+          "should_release=$($shouldRelease.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Create GitHub Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && steps.release_gate.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.next_tag.outputs.tag }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }} - SDRSharp >=v1912
           target_commitish: ${{ github.sha }}
-          files: SDRSharp.RdsDisplay.zip
+          files: SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip
