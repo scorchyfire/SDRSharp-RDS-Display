@@ -1,10 +1,10 @@
-name: Build and Release (Main)
+name: Build and Release (Latest Version)
 
 on:
   push:
-    branches: ["main"]
+    branches: ["latest-version"]
   pull_request:
-    branches: ["main"]
+    branches: ["latest-version"]
   workflow_dispatch:
 
 jobs:
@@ -41,14 +41,14 @@ jobs:
         shell: pwsh
         run: |
           $outDir = "sdrplugins/Release/net7.0-windows"
-          $zipName = "SDRSharp_v1911andunder-RDS-Display-${{ steps.version.outputs.version }}.zip"
+          $zipName = "SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip"
           Compress-Archive -Path "$outDir/SDRSharp.RdsDisplay.dll", "$outDir/pi_codes.json" -DestinationPath $zipName
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SDRSharp_v1911andunder-RDS-Display-${{ steps.version.outputs.version }}
-          path: SDRSharp_v1911andunder-RDS-Display-${{ steps.version.outputs.version }}.zip
+          name: SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}
+          path: SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip
 
       - name: Check release eligibility
         if: github.event_name == 'push'
@@ -80,6 +80,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
-          name: ${{ steps.version.outputs.version }} - SDRSharp <=v1911
+          name: ${{ steps.version.outputs.version }} - SDRSharp >=v1912
           target_commitish: ${{ github.sha }}
-          files: SDRSharp_v1911andunder-RDS-Display-${{ steps.version.outputs.version }}.zip
+          files: SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip
