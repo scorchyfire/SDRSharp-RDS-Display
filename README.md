@@ -4,6 +4,9 @@ A plugin for [SDRSharp](https://airspy.com/download/) that decodes and displays 
 
 ---
 
+## Important Note
+- For SDRSharp versions **1912 or newer**, please see the branch [latest-version](https://github.com/scorchyfire/SDRSharp-RDS-Display/tree/latest-version) and subsequent v1912+ targeted releases!
+
 ## Features
 
 - **Live RDS panel** showing:
