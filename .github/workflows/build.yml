@@ -22,7 +22,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "7.0.x"
 
       - name: Build (Release)
         run: dotnet build sdrplugins/sdrplugins.sln --configuration Release
@@ -67,7 +67,7 @@ jobs:
             $changed = git diff --name-only $before "${{ github.sha }}" -- version.txt
             if ($changed) {
               $versionExistsInBefore = git ls-tree --name-only $before -- version.txt
-              $previousVersion = if ($versionExistsInBefore) { (git show "$before:version.txt").Trim() } else { "" }
+              $previousVersion = if ($versionExistsInBefore) { (git show "${before}:version.txt").Trim() } else { "" }
               if ($previousVersion -ne $currentVersion) {
                 $shouldRelease = $true
               }
