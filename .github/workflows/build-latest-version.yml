@@ -66,8 +66,8 @@ jobs:
           if ($before -and $before -ne "0000000000000000000000000000000000000000") {
             $changed = git diff --name-only $before "${{ github.sha }}" -- version.txt
             if ($changed) {
-              $gitShowOutput = git show "$before:version.txt" 2>$null
-              $previousVersion = if ($null -ne $gitShowOutput) { $gitShowOutput.Trim() } else { "" }
+              $versionExistsInBefore = git ls-tree --name-only $before -- version.txt
+              $previousVersion = if ($versionExistsInBefore) { (git show "$before:version.txt").Trim() } else { "" }
               if ($previousVersion -ne $currentVersion) {
                 $shouldRelease = $true
               }
