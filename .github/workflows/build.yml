@@ -22,7 +22,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "7.0.x"
+          dotnet-version: "9.0.x"
 
       - name: Build (Release)
         run: dotnet build sdrplugins/sdrplugins.sln --configuration Release
@@ -40,7 +40,7 @@ jobs:
       - name: Create release zip
         shell: pwsh
         run: |
-          $outDir = "sdrplugins/Release/net7.0-windows"
+          $outDir = "sdrplugins/Release/net9.0-windows"
           $zipName = "SDRSharp_v1912andnewer-RDS-Display-${{ steps.version.outputs.version }}.zip"
           Compress-Archive -Path "$outDir/SDRSharp.RdsDisplay.dll", "$outDir/pi_codes.json" -DestinationPath $zipName
 
