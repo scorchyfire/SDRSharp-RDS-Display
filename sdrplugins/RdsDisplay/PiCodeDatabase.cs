@@ -89,16 +89,20 @@ namespace SDRSharp.RdsDisplay
         {
             isTranslator = false;
 
+            // Custom entries are keyed by raw PI (user entered them that way)
             if (_custom.TryGetValue(piCode, out string? custom) && !string.IsNullOrEmpty(custom))
                 return custom;
 
-            if (_iheart.TryGetValue(piCode, out IHeartEntry? ih))
+            // Database entries are keyed by remapped PI (matching rdscalculator.js switch keys)
+            int lookupPi = RemapPi(piCode);
+
+            if (_iheart.TryGetValue(lookupPi, out IHeartEntry? ih))
             {
                 bool freqMatch = ih.Frequency == 0 || ih.Frequency == currentFrequencyHz;
                 return (useIHeart && freqMatch) ? ih.IHeart : ih.Primary;
             }
 
-            if (_normal.TryGetValue(piCode, out string? normal) && !string.IsNullOrEmpty(normal))
+            if (_normal.TryGetValue(lookupPi, out string? normal) && !string.IsNullOrEmpty(normal))
             {
                 if (IsTranslatorEntry(normal))
                 {
@@ -109,6 +113,22 @@ namespace SDRSharp.RdsDisplay
             }
 
             return AlgorithmicDecode(piCode);
+        }
+
+        // Apply the A-prefix remapping from rdscalculator.js before any lookup or decode.
+        // AF__ → __00, A___ (non-AF) → _0__
+        private static int RemapPi(int pi)
+        {
+            string piHex = pi.ToString("X4");
+            if (piHex.Length == 4 && piHex[0] == 'A')
+            {
+                string remapped = piHex[1] == 'F'
+                    ? piHex.Substring(2) + "00"
+                    : piHex[1] + "0" + piHex.Substring(2);
+                if (int.TryParse(remapped, System.Globalization.NumberStyles.HexNumber, null, out int remappedPi))
+                    return remappedPi;
+            }
+            return pi;
         }
 
         // ── Minimal JSON helpers ────────────────────────────────────────────────────
@@ -399,6 +419,7 @@ namespace SDRSharp.RdsDisplay
 
         private static string AlgorithmicDecode(int pi)
         {
+            pi = RemapPi(pi);
             if (pi <= 4095 || pi >= 39247) return pi.ToString("X4");
 
             string call1;
