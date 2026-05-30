@@ -5832,7 +5832,7 @@
                                 "iheartFrequency":  "101.3 MHz"
                             },
                    "5367":  {
-                                "primary":  "KBWX",
+                                "primary":  "KATZ",
                                 "iheart":  "KHYL",
                                 "iheartFrequency":  "101.1 MHz"
                             },
@@ -7625,6 +7625,26 @@
                                 "primary":  "KALM",
                                 "iheart":  "WMOV",
                                 "iheartFrequency":  "107.7 MHz"
-                            }
+                            },
+                    "6404": {
+                                "primary":  "KDKU",
+                                "iheart":  "WCHI",
+                                "iheartFrequency":  "95.5 MHz"
+                    },
+                    "6118": {
+                                "primary":  "KCZU",
+                                "iheart":  "WKSC",
+                                "iheartFrequency":  "103.5 MHz"
+                    },
+                    "5311": {
+                        "primary": "KBUT",
+                        "iheart": "KSLZ",
+                        "iheartFrequency": "107.7 MHz"
+                    },
+                    "5030": {
+                        "primary": "KBJY",
+                        "iheart": "KTLK",
+                        "iheartFrequency": "104.9 MHz"
+                    }
                }
 }
