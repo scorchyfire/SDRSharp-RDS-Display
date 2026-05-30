@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Reflection;
 using System.Windows.Forms;
 using SDRSharp.Common;
@@ -92,7 +93,39 @@ namespace SDRSharp.RdsDisplay
                 _spectrumAnalyzer.BeginInvoke((Action)OnTickCore);
         }
 
-        private void OnTick(object? sender, EventArgs e) => OnTickCore();
+        private int _tickCount = 0;
+
+        private void OnTick(object? sender, EventArgs e)
+        {
+            _tickCount++;
+
+            bool needsInject = _rdsBar == null || _rdsBar.IsDisposed;
+            bool layoutNotReady = _spectrumAnalyzer == null
+                                  || _spectrumAnalyzer.Width < 200
+                                  || _spectrumAnalyzer.Height < 50;
+
+            // Log every 4th tick (every 2 seconds) until bar is injected
+            if (needsInject && _tickCount % 4 == 1)
+            {
+                Log($"Tick#{_tickCount} needsInject={needsInject} spectrum={((_spectrumAnalyzer == null) ? "null" : $"{_spectrumAnalyzer.GetType().Name} {_spectrumAnalyzer.Bounds} handle={_spectrumAnalyzer.IsHandleCreated}")}");
+                Log($"  OpenForms: {string.Join(", ", System.Linq.Enumerable.Select(Application.OpenForms.Cast<Form>(), f => $"'{f.Name}'({f.GetType().Name},{f.Bounds})"))}");
+
+                // Dump ALL controls in all forms
+                foreach (Form form in Application.OpenForms)
+                    foreach (var c in GetAllControls(form))
+                        if (c.GetType().Name.Contains("Spectrum") || c.GetType().Name.Contains("PanView") || c.GetType().Name.Contains("Plugin") || c.GetType().Name.Contains("Dock") || c.GetType().Name.Contains("Waterfall"))
+                            Log($"  FOUND: {c.GetType().Name} '{c.Name}' {c.Bounds} handle={c.IsHandleCreated} parent={c.Parent?.GetType().Name}");
+            }
+
+            if (needsInject || layoutNotReady)
+            {
+                if (layoutNotReady && _rdsBar != null && !_rdsBar.IsDisposed)
+                    RemoveRdsBar();
+                TryInjectRdsBar();
+            }
+
+            OnTickCore();
+        }
 
         private void OnTickCore()
         {
@@ -348,9 +381,6 @@ namespace SDRSharp.RdsDisplay
 
         private void SetRdsBarText(string text)
         {
-            if (_rdsBar == null || _rdsBar.IsDisposed)
-                TryInjectRdsBar();
-
             if (_rdsBar == null || _rdsBar.IsDisposed) return;
 
             if (_rdsBar.InvokeRequired)
@@ -359,49 +389,110 @@ namespace SDRSharp.RdsDisplay
                 _rdsBar.Text = text;
         }
 
+        private static string _logPath = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "RdsDisplayLog.txt");
+        private static void Log(string msg)
+        {
+            try { System.IO.File.AppendAllText(_logPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\r\n"); } catch { }
+        }
+
         private void TryInjectRdsBar()
         {
             _spectrumAnalyzer = FindMainSpectrumAnalyzer();
             if (_spectrumAnalyzer == null) return;
 
-            var parent = _spectrumAnalyzer.Parent;
-            if (parent == null) return;
+            // Don't inject until the control has been laid out to its real size
+            if (_spectrumAnalyzer.Width < 200 || _spectrumAnalyzer.Height < 50) return;
 
-            foreach (Control c in parent.Controls)
-                if (c is StretchedLabel lbl && lbl.Name == "RdsDisplayBar") { _rdsBar = lbl; return; }
+            Control host = FindOverlayHost(_spectrumAnalyzer);
+
+            // Log host + full parent chain every time we reach a real layout
+            var chain = new System.Text.StringBuilder();
+            var pp = _spectrumAnalyzer.Parent;
+            while (pp != null) { chain.Append($"{pp.GetType().Name}('{pp.Name}',{pp.Bounds}) > "); pp = pp.Parent; }
+            Log($"INJECT spectrum={_spectrumAnalyzer.Bounds} host={host.GetType().Name}('{host.Name}',{host.Bounds})");
+            Log($"  chain: {chain}");
+
+            // Reuse an existing bar if already injected into this host
+            foreach (Control c in host.Controls)
+            {
+                if (c is StretchedLabel lbl && lbl.Name == "RdsDisplayBar") { _rdsBar = lbl; Log("  reused"); return; }
+                Log($"  existing child: {c.GetType().Name} '{c.Name}' {c.Bounds}");
+            }
+
+            // Convert spectrum's top-left corner into host-relative coordinates
+            Point specInHost;
+            try { specInHost = host.PointToClient(_spectrumAnalyzer.PointToScreen(Point.Empty)); }
+            catch (Exception ex) { Log($"  PointToClient failed: {ex.Message}"); return; }
+
+            Log($"  specInHost={specInHost}  barLeft={specInHost.X + BarLeftOffset} barTop={specInHost.Y + BarTopOffset} barW={_spectrumAnalyzer.Width - BarLeftOffset - BarRightMargin}");
 
             var bar = new StretchedLabel
             {
                 Name        = "RdsDisplayBar",
-                Text        = "",
+                Text        = "RDS",
                 Dock        = DockStyle.None,
                 AutoSize    = false,
                 UseMnemonic = false,
-                Left        = _spectrumAnalyzer.Left + BarLeftOffset,
-                Top         = _spectrumAnalyzer.Top  + BarTopOffset,
+                Left        = specInHost.X + BarLeftOffset,
+                Top         = specInHost.Y + BarTopOffset,
                 Height      = BarHeight,
-                Width       = GetBarWidth(),
+                Width       = Math.Max(0, _spectrumAnalyzer.Width - BarLeftOffset - BarRightMargin),
             };
 
             ApplyBarAppearance(bar);
+            Log($"  bar created: {bar.Bounds} fore={bar.ForeColor} back={bar.BackColor} visible={bar.Visible}");
 
-            _spectrumAnalyzer.Resize += (s, e) =>
+            void SyncBar()
             {
-                if (bar.IsDisposed || _spectrumAnalyzer.IsDisposed) return;
-                bar.Left  = _spectrumAnalyzer.Left  + BarLeftOffset;
-                bar.Top   = _spectrumAnalyzer.Top   + BarTopOffset;
-                bar.Width = GetBarWidth();
-            };
+                if (bar.IsDisposed || _spectrumAnalyzer == null || _spectrumAnalyzer.IsDisposed || host.IsDisposed) return;
+                try
+                {
+                    Point pt = host.PointToClient(_spectrumAnalyzer.PointToScreen(Point.Empty));
+                    bar.Left  = pt.X + BarLeftOffset;
+                    bar.Top   = pt.Y + BarTopOffset;
+                    bar.Width = Math.Max(0, _spectrumAnalyzer.Width - BarLeftOffset - BarRightMargin);
+                }
+                catch { }
+            }
 
-            parent.Controls.Add(bar);
+            _spectrumAnalyzer.Resize         += (s, e) => SyncBar();
+            _spectrumAnalyzer.LocationChanged += (s, e) => SyncBar();
+            host.Resize += (s, e) => SyncBar();
+
+            host.Controls.Add(bar);
             bar.BringToFront();
             _rdsBar = bar;
+            Log($"  DONE. host now has {host.Controls.Count} children. bar.Parent={bar.Parent?.GetType().Name}");
+        }
+
+        // Walk up from the SpectrumAnalyzer to find the best WinForms container to
+        // host the overlay. The SpectrumAnalyzer is owner-drawn (GDI) and paints over
+        // its own children, so we must use an ancestor.
+        private static Control FindOverlayHost(Control spectrum)
+        {
+            // Walk up and take the first standard compositing container.
+            // Priority: SplitterPanel > PluginGuiContainer > any non-Form panel.
+            Control? splitter = null, pluginGui = null, anyPanel = null;
+
+            var cur = spectrum.Parent;
+            while (cur != null)
+            {
+                string t = cur.GetType().Name;
+                if (t == "SplitterPanel"      && splitter   == null) splitter   = cur;
+                if (t == "PluginGuiContainer" && pluginGui  == null) pluginGui  = cur;
+                if (cur is Panel               && anyPanel  == null) anyPanel   = cur;
+                if (cur is Form) break;
+                cur = cur.Parent;
+            }
+
+            return splitter ?? pluginGui ?? anyPanel ?? spectrum.Parent ?? spectrum;
         }
 
         private int GetBarWidth()
         {
             if (_spectrumAnalyzer == null || _spectrumAnalyzer.IsDisposed) return 0;
-            return _spectrumAnalyzer.Width - BarLeftOffset - BarRightMargin;
+            return Math.Max(0, _spectrumAnalyzer.Width - BarLeftOffset - BarRightMargin);
         }
 
         internal void ApplyBarAppearance(StretchedLabel? bar = null)
@@ -434,11 +525,52 @@ namespace SDRSharp.RdsDisplay
 
         private static Control? FindMainSpectrumAnalyzer()
         {
+            // Pass 1: named 'spectrumAnalyzer' inside the 'spectrumWindow' DockContent
             foreach (Form form in Application.OpenForms)
                 foreach (Control c in GetAllControls(form))
-                    if (c.GetType().Name == "SpectrumAnalyzer" && !IsInZoomOrMpxPanel(c))
+                    if (c.GetType().Name == "SpectrumAnalyzer" && c.Name == "spectrumAnalyzer")
                         return c;
+
+            // Pass 2: any SpectrumAnalyzer inside a DockContent named 'spectrumWindow'
+            foreach (Form form in Application.OpenForms)
+                foreach (Control c in GetAllControls(form))
+                    if (c.GetType().Name == "SpectrumAnalyzer" && HasAncestor(c, "DockContent", "spectrumWindow"))
+                        return c;
+
+            // Pass 3: any SpectrumAnalyzer with a real size, not in a zoom/MPX panel,
+            // and not inside PluginGuiContainer (which holds the hidden placeholder)
+            foreach (Form form in Application.OpenForms)
+                foreach (Control c in GetAllControls(form))
+                    if (c.GetType().Name == "SpectrumAnalyzer"
+                        && c.Width > 200 && c.Height > 50
+                        && !HasAncestor(c, "PluginGuiContainer", null)
+                        && !IsInZoomOrMpxPanel(c))
+                        return c;
+
             return null;
+        }
+
+        private static bool HasAncestor(Control c, string typeName, string? name = null)
+        {
+            var cur = c.Parent;
+            while (cur != null)
+            {
+                if (cur.GetType().Name == typeName && (name == null || cur.Name == name))
+                    return true;
+                cur = cur.Parent;
+            }
+            return false;
+        }
+
+        private static bool HasAncestor(Control c, string typeName)
+        {
+            var cur = c.Parent;
+            while (cur != null)
+            {
+                if (cur.GetType().Name == typeName) return true;
+                cur = cur.Parent;
+            }
+            return false;
         }
 
         private static bool IsInZoomOrMpxPanel(Control c)
@@ -447,8 +579,12 @@ namespace SDRSharp.RdsDisplay
             while (cur != null)
             {
                 string n = cur.Name ?? "";
+                string t = cur.GetType().Name;
                 if (n == "Zoom MPX" || n == "Zoom IF" || n == "Zoom AF" ||
-                    n.Contains("MPX") || n.Contains("FM MPX"))
+                    n.Contains("MPX") || n.Contains("FM MPX") ||
+                    t == "ZoomFFTPanel" || t == "ZoomPanel")
+                    return true;
+                if (cur is Form f && (f.Text ?? "").Contains("MPX"))
                     return true;
                 cur = cur.Parent;
             }
@@ -472,6 +608,7 @@ namespace SDRSharp.RdsDisplay
     // Label subclass that horizontally stretches text by ScaleStretchX extra pixels per character.
     internal sealed class StretchedLabel : Label
     {
+        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
         public float ScaleStretchX { get; set; } = 0.5f;
 
         public StretchedLabel()
