@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
-using System.Text.Json.Nodes;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace SDRSharp.RdsDisplay
 {
@@ -35,43 +35,33 @@ namespace SDRSharp.RdsDisplay
 
             try
             {
-                // Read without BOM so JsonNode.Parse doesn't choke on UTF-8 BOM bytes
                 var raw = File.ReadAllBytes(path);
+                // Strip UTF-8 BOM if present
                 int start = (raw.Length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) ? 3 : 0;
-                var json = System.Text.Encoding.UTF8.GetString(raw, start, raw.Length - start);
-                var root = JsonNode.Parse(json);
-                if (root == null) return;
+                var json = Encoding.UTF8.GetString(raw, start, raw.Length - start);
 
                 _normal.Clear();
                 _iheart.Clear();
                 _custom.Clear();
 
-                var normalNode = root["normal"]?.AsObject();
-                if (normalNode != null)
-                    foreach (var kv in normalNode)
-                        if (int.TryParse(kv.Key, out int pi))
-                            _normal[pi] = kv.Value?.GetValue<string>() ?? "";
+                // Extract the three top-level sections using a minimal JSON reader
+                var normalSection  = ExtractSection(json, "normal");
+                var iheartSection  = ExtractSection(json, "iheart");
+                var customSection  = ExtractSection(json, "custom");
 
-                var iheartNode = root["iheart"]?.AsObject();
-                if (iheartNode != null)
-                    foreach (var kv in iheartNode)
-                        if (int.TryParse(kv.Key, out int pi))
-                        {
-                            var obj = kv.Value?.AsObject();
-                            if (obj != null)
-                                _iheart[pi] = new IHeartEntry
-                                {
-                                    Primary   = obj["primary"]?.GetValue<string>() ?? "",
-                                    IHeart    = obj["iheart"]?.GetValue<string>() ?? "",
-                                    Frequency = ParseFrequency(obj["iheartFrequency"]?.GetValue<string>())
-                                };
-                        }
+                // "normal": { "12345": "WXYZ", ... }
+                foreach (var kv in ParseFlatStringObject(normalSection))
+                    if (int.TryParse(kv.Key, out int pi))
+                        _normal[pi] = kv.Value;
 
-                var customNode = root["custom"]?.AsObject();
-                if (customNode != null)
-                    foreach (var kv in customNode)
-                        if (int.TryParse(kv.Key, out int pi))
-                            _custom[pi] = kv.Value?.GetValue<string>() ?? "";
+                // "iheart": { "12345": { "primary": "WXYZ", "iheart": "WABC", "iheartFrequency": "98.7 MHz" }, ... }
+                foreach (var kv in ParseIHeartSection(iheartSection))
+                    _iheart[kv.Key] = kv.Value;
+
+                // "custom": { "12345": "WXYZ", ... }
+                foreach (var kv in ParseFlatStringObject(customSection))
+                    if (int.TryParse(kv.Key, out int pi))
+                        _custom[pi] = kv.Value;
             }
             catch { /* silently ignore corrupt JSON */ }
         }
@@ -80,57 +70,306 @@ namespace SDRSharp.RdsDisplay
         {
             try
             {
-                var json = File.ReadAllText(DatabasePath);
-                var root = JsonNode.Parse(json) as JsonObject;
-                if (root == null) return;
+                if (!File.Exists(DatabasePath)) return;
+                var raw = File.ReadAllBytes(DatabasePath);
+                int bom = (raw.Length >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF) ? 3 : 0;
+                var json = Encoding.UTF8.GetString(raw, bom, raw.Length - bom);
 
-                root.Remove("settings");
+                // Replace the "custom" section with the current custom entries
+                var customJson = BuildFlatStringObject(_custom);
+                json = ReplaceSection(json, "custom", customJson);
 
-                var customObj = new JsonObject();
-                foreach (var kv in _custom)
-                    customObj[kv.Key.ToString()] = JsonValue.Create(kv.Value);
-                root["custom"] = customObj;
-
-                var opts = new JsonSerializerOptions { WriteIndented = true };
-                var utf8NoBom = new System.Text.UTF8Encoding(false);
-                File.WriteAllText(DatabasePath, root.ToJsonString(opts), utf8NoBom);
+                File.WriteAllText(DatabasePath, json, new UTF8Encoding(false));
             }
             catch { }
         }
 
         // Resolve a PI code to a callsign string.
-        // currentFrequencyHz: current tuned frequency in Hz, for iHeart frequency matching.
-        // useIHeart: if true and frequency matches (or unset), return the iHeart market station.
         public string Resolve(int piCode, bool useIHeart, long currentFrequencyHz, out bool isTranslator)
         {
             isTranslator = false;
 
-            // User custom overrides take priority
+            // Custom entries are keyed by raw PI (user entered them that way)
             if (_custom.TryGetValue(piCode, out string? custom) && !string.IsNullOrEmpty(custom))
                 return custom;
 
-            // iHeart dual-mapping
-            if (_iheart.TryGetValue(piCode, out IHeartEntry? ih))
+            // Database entries are keyed by remapped PI (matching rdscalculator.js switch keys)
+            int lookupPi = RemapPi(piCode);
+
+            if (_iheart.TryGetValue(lookupPi, out IHeartEntry? ih))
             {
                 bool freqMatch = ih.Frequency == 0 || ih.Frequency == currentFrequencyHz;
                 return (useIHeart && freqMatch) ? ih.IHeart : ih.Primary;
             }
 
-            // Normal lookup
-            if (_normal.TryGetValue(piCode, out string? normal) && !string.IsNullOrEmpty(normal))
+            if (_normal.TryGetValue(lookupPi, out string? normal) && !string.IsNullOrEmpty(normal))
             {
-                // Check if this is a translator entry (contains comma-separated callsigns like "K266CN, W279DI")
                 if (IsTranslatorEntry(normal))
                 {
                     isTranslator = true;
-                    return normal; // caller will resolve by frequency channel
+                    return normal;
                 }
                 return normal;
             }
 
-            // Algorithmic decode for 4-letter callsigns (standard NRSC PI algorithm)
             return AlgorithmicDecode(piCode);
         }
+
+        // Apply the A-prefix remapping from rdscalculator.js before any lookup or decode.
+        // AF__ → __00, A___ (non-AF) → _0__
+        private static int RemapPi(int pi)
+        {
+            string piHex = pi.ToString("X4");
+            if (piHex.Length == 4 && piHex[0] == 'A')
+            {
+                string remapped = piHex[1] == 'F'
+                    ? piHex.Substring(2) + "00"
+                    : piHex[1] + "0" + piHex.Substring(2);
+                if (int.TryParse(remapped, System.Globalization.NumberStyles.HexNumber, null, out int remappedPi))
+                    return remappedPi;
+            }
+            return pi;
+        }
+
+        // ── Minimal JSON helpers ────────────────────────────────────────────────────
+
+        // Extract the raw JSON text of a top-level object section by key name.
+        // Returns the content between the outermost { } of that section (not including braces).
+        private static string ExtractSection(string json, string key)
+        {
+            // Find "key": {
+            int keyPos = FindKey(json, key, 0);
+            if (keyPos < 0) return "";
+
+            int braceStart = json.IndexOf('{', keyPos);
+            if (braceStart < 0) return "";
+
+            int depth = 0;
+            for (int i = braceStart; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (c == '"') { i = SkipString(json, i + 1); continue; }
+                if (c == '{') depth++;
+                else if (c == '}') { depth--; if (depth == 0) return json.Substring(braceStart + 1, i - braceStart - 1); }
+            }
+            return "";
+        }
+
+        // Find the position of "key": in the json string (avoids matching inside string values)
+        private static int FindKey(string json, string key, int startAt)
+        {
+            string needle = "\"" + key + "\"";
+            int pos = startAt;
+            while ((pos = json.IndexOf(needle, pos, StringComparison.Ordinal)) >= 0)
+            {
+                // Check that the next non-whitespace after the key is ':'
+                int after = pos + needle.Length;
+                while (after < json.Length && json[after] == ' ') after++;
+                if (after < json.Length && json[after] == ':')
+                    return pos;
+                pos++;
+            }
+            return -1;
+        }
+
+        // Skip past a JSON string starting right after the opening quote.
+        // Returns the index of the closing quote.
+        private static int SkipString(string json, int i)
+        {
+            while (i < json.Length)
+            {
+                if (json[i] == '\\') { i += 2; continue; }
+                if (json[i] == '"') return i;
+                i++;
+            }
+            return i;
+        }
+
+        // Parse { "key": "value", ... } into a flat string dictionary.
+        private static IEnumerable<KeyValuePair<string, string>> ParseFlatStringObject(string section)
+        {
+            int i = 0;
+            while (i < section.Length)
+            {
+                // Find next "key"
+                int qs = section.IndexOf('"', i);
+                if (qs < 0) yield break;
+                int qe = SkipString(section, qs + 1);
+                string key = section.Substring(qs + 1, qe - qs - 1);
+                i = qe + 1;
+
+                // Find ':'
+                int colon = section.IndexOf(':', i);
+                if (colon < 0) yield break;
+                i = colon + 1;
+
+                // Skip whitespace
+                while (i < section.Length && (section[i] == ' ' || section[i] == '\r' || section[i] == '\n' || section[i] == '\t')) i++;
+                if (i >= section.Length) yield break;
+
+                if (section[i] == '"')
+                {
+                    // String value
+                    int vs = i;
+                    int ve = SkipString(section, vs + 1);
+                    string val = UnescapeJsonString(section.Substring(vs + 1, ve - vs - 1));
+                    yield return new KeyValuePair<string, string>(key, val);
+                    i = ve + 1;
+                }
+                else if (section[i] == '{')
+                {
+                    // Nested object — skip it (not expected for flat sections)
+                    int depth2 = 0;
+                    while (i < section.Length)
+                    {
+                        if (section[i] == '"') { i = SkipString(section, i + 1) + 1; continue; }
+                        if (section[i] == '{') depth2++;
+                        else if (section[i] == '}') { depth2--; if (depth2 == 0) { i++; break; } }
+                        i++;
+                    }
+                }
+                else
+                {
+                    // null, number, bool — skip to next comma or end
+                    while (i < section.Length && section[i] != ',' && section[i] != '}') i++;
+                    i++;
+                }
+            }
+        }
+
+        // Parse the iheart section: { "12345": { "primary": "X", "iheart": "Y", "iheartFrequency": "Z" }, ... }
+        private static IEnumerable<KeyValuePair<int, IHeartEntry>> ParseIHeartSection(string section)
+        {
+            int i = 0;
+            while (i < section.Length)
+            {
+                int qs = section.IndexOf('"', i);
+                if (qs < 0) yield break;
+                int qe = SkipString(section, qs + 1);
+                string key = section.Substring(qs + 1, qe - qs - 1);
+                i = qe + 1;
+
+                if (!int.TryParse(key, out int pi)) { i++; continue; }
+
+                int colon = section.IndexOf(':', i);
+                if (colon < 0) yield break;
+                i = colon + 1;
+
+                while (i < section.Length && (section[i] == ' ' || section[i] == '\r' || section[i] == '\n' || section[i] == '\t')) i++;
+                if (i >= section.Length || section[i] != '{') { i++; continue; }
+
+                // Find matching }
+                int objStart = i;
+                int depth2 = 0;
+                int objEnd = i;
+                for (int j = i; j < section.Length; j++)
+                {
+                    if (section[j] == '"') { j = SkipString(section, j + 1); continue; }
+                    if (section[j] == '{') depth2++;
+                    else if (section[j] == '}') { depth2--; if (depth2 == 0) { objEnd = j; break; } }
+                }
+
+                string inner = section.Substring(objStart + 1, objEnd - objStart - 1);
+                var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in ParseFlatStringObject(inner))
+                    fields[kv.Key] = kv.Value;
+
+                fields.TryGetValue("primary", out string? primary);
+                fields.TryGetValue("iheart", out string? iheart);
+                fields.TryGetValue("iheartFrequency", out string? freq);
+
+                yield return new KeyValuePair<int, IHeartEntry>(pi, new IHeartEntry
+                {
+                    Primary   = primary ?? "",
+                    IHeart    = iheart ?? "",
+                    Frequency = ParseFrequency(freq)
+                });
+
+                i = objEnd + 1;
+            }
+        }
+
+        // Replace the content of "key": { ... } with newContent (a pre-built JSON object string)
+        private static string ReplaceSection(string json, string key, string newContent)
+        {
+            int keyPos = FindKey(json, key, 0);
+            if (keyPos < 0) return json;
+
+            int braceStart = json.IndexOf('{', keyPos);
+            if (braceStart < 0) return json;
+
+            int depth = 0;
+            for (int i = braceStart; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (c == '"') { i = SkipString(json, i + 1); continue; }
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                        return json.Substring(0, braceStart) + newContent + json.Substring(i + 1);
+                }
+            }
+            return json;
+        }
+
+        // Build a JSON object string from a dictionary
+        private static string BuildFlatStringObject(Dictionary<int, string> dict)
+        {
+            var sb = new StringBuilder();
+            sb.Append("{\n");
+            bool first = true;
+            foreach (var kv in dict)
+            {
+                if (!first) sb.Append(",\n");
+                sb.Append("    \"").Append(kv.Key).Append("\": \"").Append(EscapeJsonString(kv.Value)).Append('"');
+                first = false;
+            }
+            sb.Append("\n  }");
+            return sb.ToString();
+        }
+
+        private static string UnescapeJsonString(string s)
+        {
+            if (!s.Contains('\\')) return s;
+            var sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '\\' && i + 1 < s.Length)
+                {
+                    i++;
+                    switch (s[i])
+                    {
+                        case '"':  sb.Append('"');  break;
+                        case '\\': sb.Append('\\'); break;
+                        case '/':  sb.Append('/');  break;
+                        case 'n':  sb.Append('\n'); break;
+                        case 'r':  sb.Append('\r'); break;
+                        case 't':  sb.Append('\t'); break;
+                        case 'u' when i + 4 < s.Length:
+                            if (int.TryParse(s.Substring(i + 1, 4),
+                                System.Globalization.NumberStyles.HexNumber, null, out int code))
+                                sb.Append((char)code);
+                            i += 4;
+                            break;
+                        default: sb.Append(s[i]); break;
+                    }
+                }
+                else
+                {
+                    sb.Append(s[i]);
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string EscapeJsonString(string s)
+        {
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+        }
+
+        // ── Existing helpers (unchanged) ────────────────────────────────────────────
 
         private static long ParseFrequency(string? text)
         {
@@ -146,11 +385,8 @@ namespace SDRSharp.RdsDisplay
             return 0;
         }
 
-        // Check if a csign string is a translator list
         private static bool IsTranslatorEntry(string csign)
         {
-            // Translator entries look like "K266CN, W279DI, K271BS" — multiple FM translator calls
-            // FM translators are 6-char: K/W + 3-digit channel + 2-letter suffix
             var parts = csign.Split(',');
             if (parts.Length < 2) return false;
             foreach (var p in parts)
@@ -165,7 +401,6 @@ namespace SDRSharp.RdsDisplay
             return false;
         }
 
-        // Given a translator entry string and a channel number (200-300), return the matching callsign
         public static string ResolveTranslator(string translatorEntry, int channel)
         {
             if (channel < 200 || channel > 300) return translatorEntry;
@@ -179,13 +414,12 @@ namespace SDRSharp.RdsDisplay
                     t.Substring(1, 3) == channelStr)
                     return t;
             }
-            // No exact match — return the first one as fallback
             return parts[0].Trim();
         }
 
-        // Standard NRSC FM PI algorithmic decode
         private static string AlgorithmicDecode(int pi)
         {
+            pi = RemapPi(pi);
             if (pi <= 4095 || pi >= 39247) return pi.ToString("X4");
 
             string call1;
@@ -212,11 +446,8 @@ namespace SDRSharp.RdsDisplay
                    ((char)(c4 + 65)).ToString();
         }
 
-        // Frequency (Hz) to FM channel number (200-300)
         public static int FrequencyToChannel(long frequencyHz)
         {
-            // Channel N = 87.9 + (N-200)*0.2 MHz
-            // N = (freq_MHz - 87.9) / 0.2 + 200
             double freqMhz = frequencyHz / 1_000_000.0;
             int channel = (int)Math.Round((freqMhz - 87.9) / 0.2) + 200;
             return channel;
