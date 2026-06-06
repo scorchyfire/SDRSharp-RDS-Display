@@ -104,19 +104,6 @@ namespace SDRSharp.RdsDisplay
                                   || _spectrumAnalyzer.Width < 200
                                   || _spectrumAnalyzer.Height < 50;
 
-            // Log every 4th tick (every 2 seconds) until bar is injected
-            if (needsInject && _tickCount % 4 == 1)
-            {
-                Log($"Tick#{_tickCount} needsInject={needsInject} spectrum={((_spectrumAnalyzer == null) ? "null" : $"{_spectrumAnalyzer.GetType().Name} {_spectrumAnalyzer.Bounds} handle={_spectrumAnalyzer.IsHandleCreated}")}");
-                Log($"  OpenForms: {string.Join(", ", System.Linq.Enumerable.Select(Application.OpenForms.Cast<Form>(), f => $"'{f.Name}'({f.GetType().Name},{f.Bounds})"))}");
-
-                // Dump ALL controls in all forms
-                foreach (Form form in Application.OpenForms)
-                    foreach (var c in GetAllControls(form))
-                        if (c.GetType().Name.Contains("Spectrum") || c.GetType().Name.Contains("PanView") || c.GetType().Name.Contains("Plugin") || c.GetType().Name.Contains("Dock") || c.GetType().Name.Contains("Waterfall"))
-                            Log($"  FOUND: {c.GetType().Name} '{c.Name}' {c.Bounds} handle={c.IsHandleCreated} parent={c.Parent?.GetType().Name}");
-            }
-
             if (needsInject || layoutNotReady)
             {
                 if (layoutNotReady && _rdsBar != null && !_rdsBar.IsDisposed)
@@ -410,22 +397,17 @@ namespace SDRSharp.RdsDisplay
             var chain = new System.Text.StringBuilder();
             var pp = _spectrumAnalyzer.Parent;
             while (pp != null) { chain.Append($"{pp.GetType().Name}('{pp.Name}',{pp.Bounds}) > "); pp = pp.Parent; }
-            Log($"INJECT spectrum={_spectrumAnalyzer.Bounds} host={host.GetType().Name}('{host.Name}',{host.Bounds})");
-            Log($"  chain: {chain}");
 
             // Reuse an existing bar if already injected into this host
             foreach (Control c in host.Controls)
             {
                 if (c is StretchedLabel lbl && lbl.Name == "RdsDisplayBar") { _rdsBar = lbl; Log("  reused"); return; }
-                Log($"  existing child: {c.GetType().Name} '{c.Name}' {c.Bounds}");
             }
 
             // Convert spectrum's top-left corner into host-relative coordinates
             Point specInHost;
             try { specInHost = host.PointToClient(_spectrumAnalyzer.PointToScreen(Point.Empty)); }
-            catch (Exception ex) { Log($"  PointToClient failed: {ex.Message}"); return; }
-
-            Log($"  specInHost={specInHost}  barLeft={specInHost.X + BarLeftOffset} barTop={specInHost.Y + BarTopOffset} barW={_spectrumAnalyzer.Width - BarLeftOffset - BarRightMargin}");
+            catch (Exception ex) { return; }
 
             var bar = new StretchedLabel
             {
@@ -441,7 +423,6 @@ namespace SDRSharp.RdsDisplay
             };
 
             ApplyBarAppearance(bar);
-            Log($"  bar created: {bar.Bounds} fore={bar.ForeColor} back={bar.BackColor} visible={bar.Visible}");
 
             void SyncBar()
             {
@@ -463,7 +444,6 @@ namespace SDRSharp.RdsDisplay
             host.Controls.Add(bar);
             bar.BringToFront();
             _rdsBar = bar;
-            Log($"  DONE. host now has {host.Controls.Count} children. bar.Parent={bar.Parent?.GetType().Name}");
         }
 
         // Walk up from the SpectrumAnalyzer to find the best WinForms container to
