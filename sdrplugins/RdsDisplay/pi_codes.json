@@ -1096,7 +1096,7 @@
                    "52087":  "CJUV",
                    "52598":  "CKNR",
                    "50204":  "CHDI",
-                   "6467":  "KDNF (PI code also used on Audacy [ex. iHeartMedia/Clear Channel-owned] station WBTJ)",
+                   "6467":  "KDNF",
                    "50398":  "CHKN",
                    "52564":  "CKMK",
                    "52892":  "CKYN",
@@ -2932,7 +2932,7 @@
                    "51672":  "CJFN",
                    "53598":  "K202BY, K254DP, W276CO, K293BR, W246BQ, W294CL, K259AW, W250CC",
                    "50813":  "CHZV",
-                   "4463":  "KAOD (PI code also used on Audacy [ex. iHeartMedia/Clear Channel-owned] station WKXJ)",
+                   "4463":  "KAOD",
                    "54731":  "K271CV, W280FW, W285FR",
                    "54571":  "W227DV, W228EK",
                    "54637":  "W293DK, W242DG",
@@ -3333,7 +3333,7 @@
                    "54645":  "W230CV, W262DM",
                    "54776":  "W215CM",
                    "51879":  "CJND",
-                   "6407":  "KDKX (PI code also used on Audacy [ex. iHeartMedia/Clear Channel-owned] station WTVR)",
+                   "6407":  "KDKX",
                    "54630":  "W277DG, W227DT",
                    "54706":  "W219DV",
                    "49627":  "CFIB",
@@ -4058,7 +4058,7 @@
                    "50674":  "CHUS",
                    "52020":  "CJSI",
                    "49573":  "CFGB",
-                   "53834":  "W231DL, K256BS, W246BJ, W297BH, K214BD, W276AY, K258AS, W223CV, W240CI",
+                   "53834":  "W231DL, K256BS, W246BJ, W297BH, K214BD, W276AY, K258AS, W223CV, W240CI, W252CB",
                    "54608":  "W278CL, W299CZ",
                    "54050":  "K285HF, K288CZ, W231AZ, W223CH, K245BF, K232DH, W248CT, K211FR, W273CX, K220CN",
                    "53820":  "K240CL, K232DA, W290CU, K201FD, W251AR, W263CE",
@@ -4408,7 +4408,7 @@
                    "54621":  "W299DC",
                    "39253":  "KGU",
                    "50915":  "CIDP",
-                   "5054":  "KBKW (PI code also used on Audacy [ex. iHeartMedia/Clear Channel-owned] station WRVQ)",
+                   "5054":  "KBKW",
                    "53640":  "K225BD, K243CH, W283CL, K269FS, K296HC, W226BM, K265FM, K272EF, W240BK",
                    "50854":  "CIBI",
                    "51073":  "CIJK",
@@ -4439,7 +4439,7 @@
                    "52495":  "CKJW",
                    "51277":  "CIQY",
                    "52418":  "CKHA",
-                   "5101":  "KBMR (PI code also used on Audacy [ex. iHeartMedia/Clear Channel-owned] station WRXL)",
+                   "5101":  "KBMR",
                    "49618":  "CFHT",
                    "49731":  "CFLX",
                    "54541":  "W272EA",
@@ -7645,6 +7645,46 @@
                         "primary": "KBJY",
                         "iheart": "KTLK",
                         "iheartFrequency": "104.9 MHz"
-                    }
+                    },
+                   "5101":  {
+                                "primary":  "KBMR",
+                                "iheart":  "WRXL",
+                                "iheartFrequency":  "102.1 MHz"
+                            },
+                   "6467":  {
+                                "primary":  "KDNF",
+                                "iheart":  "WBTJ",
+                                "iheartFrequency":  "106.5 MHz"
+                            },
+                   "6407":  {
+                                "primary":  "KDKX",
+                                "iheart":  "WTVR",
+                                "iheartFrequency":  "98.1 MHz"
+                            },
+                   "5054":  {
+                                "primary":  "KBKW",
+                                "iheart":  "WRVQ",
+                                "iheartFrequency":  "94.5 MHz"
+                            },
+                   "4463":  {
+                                "primary":  "KAOD",
+                                "iheart":  "WKXJ",
+                                "iheartFrequency":  "105.5 MHz"
+                            },
+                   "5107":  {
+                                "primary":  "KBMX",
+                                "iheart":  "WRXR",
+                                "iheartFrequency":  "103.7 MHz"
+                            },
+                   "7012":  {
+                                "primary":  "KEIE",
+                                "iheart":  "WUSY",
+                                "iheartFrequency":  "100.7 MHz"
+                            },
+                   "4873":  {
+                                "primary":  "KBDX",
+                                "iheart":  "WLND",
+                                "iheartFrequency":  "98.1 MHz"
+                            }
                }
 }
